@@ -12,7 +12,9 @@ def main(args=None):
         _DATASETS_PATH, num_workers=2, batch_size=8, shuffle=True, drop_last=True
     )
 
-    model = MyModel(datamodule.dims)
+    model = MyModel(datamodule.dims).load_from_checkpoint(
+        fr"mymodel\2rl3vkod\checkpoints\epoch=99-step=6399.ckpt"
+    )
 
     wandb_logger = WandbLogger(project="mymodel")
 
