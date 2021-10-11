@@ -13,28 +13,31 @@ def to_gray(x):
 
 class Encoder(nn.Module):
     def __init__(
-        self, in_channels=3, dim=64, n_residual=3, n_downsample=2, style_dim=8
+        self, in_channels=3, dim=64, n_residual=3, n_downsample=2, style_dim=8, use_stn: bool = False
     ):
         super(Encoder, self).__init__()
         self.content_encoder = ContentEncoder(1, dim, n_residual, n_downsample)
         self.style_encoder = StyleEncoder(in_channels, dim, n_downsample, style_dim)
 
-        self.localization = nn.Sequential(
-            nn.Conv2d(1, 8, kernel_size=7),
-            nn.MaxPool2d(2, stride=2),
-            nn.ReLU(True),
-            nn.Conv2d(8, 10, kernel_size=5),
-            nn.MaxPool2d(2, stride=2),
-            nn.ReLU(True),
-        )
-        self.fc_loc = nn.Sequential(
-            nn.Linear(10 * 3 * 3, 32), nn.ReLU(True), nn.Linear(32, 3 * 2)
-        )
-        self.fc_loc[2].weight.data.zero_()
-        self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
+        self.use_stn = use_stn
+        if self.use_stn:
+            self.localization = nn.Sequential(
+                nn.Conv2d(1, 8, kernel_size=7),
+                nn.MaxPool2d(2, stride=2),
+                nn.ReLU(True),
+                nn.Conv2d(8, 10, kernel_size=5),
+                nn.MaxPool2d(2, stride=2),
+                nn.ReLU(True),
+            )
+            self.fc_loc = nn.Sequential(
+                nn.Linear(10 * 3 * 3, 32), nn.ReLU(True), nn.Linear(32, 3 * 2)
+            )
+            self.fc_loc[2].weight.data.zero_()
+            self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
 
     def forward(self, x):
-        x = self.stn(x)
+        if self.use_stn:
+            x = self.stn(x)
         content_code = self.content_encoder(to_gray(x))
         style_code = self.style_encoder(x)
         return content_code, style_code

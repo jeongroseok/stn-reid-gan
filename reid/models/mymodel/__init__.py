@@ -32,6 +32,7 @@ class MyModel(pl.LightningModule):
         lambda_id: float = 0.5,
         lambda_img_recon: float = 5,
         lambda_code_recon: float = 5,
+        use_stn = False,
         *args: any,
         **kwargs: any,
     ) -> None:
@@ -44,7 +45,7 @@ class MyModel(pl.LightningModule):
 
         self.metric_accuracy = Accuracy()
 
-        self.encoder = Encoder(style_dim=256)
+        self.encoder = Encoder(style_dim=256, use_stn=use_stn)
         self.decoder = Decoder(style_dim=256)
         self.classifier = Classifier(in_features=256)
         self.discriminator = Discriminator(img_shape)
