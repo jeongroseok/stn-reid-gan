@@ -12,11 +12,9 @@ def main(args=None):
         _DATASETS_PATH, num_workers=2, batch_size=8, shuffle=True, drop_last=True
     )
 
-    model = MyModel(datamodule.dims).load_from_checkpoint(
-        fr"mymodel\2rl3vkod\checkpoints\epoch=99-step=6399.ckpt"
-    )
+    model = MyModel(datamodule.dims, st=False)
 
-    wandb_logger = WandbLogger(project="mymodel")
+    wandb_logger = WandbLogger(project="st-reid-gan")
 
     callbacks = [
         TranslationVisualization_WanDB(),
@@ -26,7 +24,7 @@ def main(args=None):
         logger=wandb_logger,
         gpus=-1 if datamodule.num_workers > 0 else None,
         progress_bar_refresh_rate=1,
-        max_epochs=100,
+        max_epochs=323,
         callbacks=callbacks,
     )
     trainer.fit(model, datamodule=datamodule)

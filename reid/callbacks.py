@@ -16,7 +16,8 @@ class TranslationVisualization_WanDB(Callback):
         dataloader = trainer.train_dataloader
 
         for imgs, lbls in dataloader:
-            img_anc, img_pos, img_neg = [tensor.to(pl_module.device) for tensor in imgs]
+            imgs = [tensor.to(pl_module.device) for tensor in imgs]
+            img_anc, img_pos, img_neg = [pl_module.stn(img) for img in imgs] if pl_module.hparams.st else imgs
             lbl_anc, lbl_pos, lbl_neg = [tensor.to(pl_module.device) for tensor in lbls]
 
             cont_anc, sty_anc = pl_module.encoder(img_anc)

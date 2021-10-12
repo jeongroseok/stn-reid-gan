@@ -3,13 +3,15 @@ from torchmetrics.classification.accuracy import Accuracy
 import pytorch_lightning as pl
 import torch
 
-from .components import Classifier
+from .components import Classifier, SpatialTransformer
 from ..munit.components import Encoder, Decoder
 from ..cyclegan.components import Discriminator
 
 
 class MyModel(pl.LightningModule):
     class __HPARAMS:
+        img_shape: Tuple[int, int, int]
+        pretraining: int
         lr: float
         beta1: float
         beta2: float
@@ -18,12 +20,15 @@ class MyModel(pl.LightningModule):
         lambda_id: float
         lambda_img_recon: float
         lambda_code_recon: float
+        st: bool
 
     hparams: __HPARAMS
 
     def __init__(
         self,
         img_shape: Tuple[int, int, int] = None,
+        style_dim: int = 2048,
+        pretraining: int = 100,
         lr=0.0001,
         beta1=0,
         beta2=0.999,
@@ -32,7 +37,7 @@ class MyModel(pl.LightningModule):
         lambda_id: float = 0.5,
         lambda_img_recon: float = 5,
         lambda_code_recon: float = 5,
-        use_stn = False,
+        st=False,
         *args: any,
         **kwargs: any,
     ) -> None:
@@ -45,16 +50,28 @@ class MyModel(pl.LightningModule):
 
         self.metric_accuracy = Accuracy()
 
-        self.encoder = Encoder(style_dim=256, use_stn=use_stn)
-        self.decoder = Decoder(style_dim=256)
-        self.classifier = Classifier(in_features=256)
+        self.stn = SpatialTransformer()
+        self.encoder = Encoder(style_dim=style_dim)
+        self.decoder = Decoder(style_dim=style_dim)
+        self.classifier = Classifier(in_features=style_dim)
         self.discriminator = Discriminator(img_shape)
         self.automatic_optimization = False
 
     def configure_optimizers(self):
         hparams = self.hparams
+        opt_stn = torch.optim.Adam(
+            list(self.encoder.parameters())
+            + list(self.classifier.parameters())
+            + list(self.stn.parameters()),
+            lr=hparams.lr,
+            betas=(hparams.beta1, hparams.beta2),
+            weight_decay=hparams.weight_decay,
+        )
         opt_gen = torch.optim.Adam(
-            list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.classifier.parameters()),
+            list(self.encoder.parameters())
+            + list(self.decoder.parameters())
+            + list(self.classifier.parameters())
+            + list(self.stn.parameters()),
             lr=hparams.lr,
             betas=(hparams.beta1, hparams.beta2),
             weight_decay=hparams.weight_decay,
@@ -65,17 +82,46 @@ class MyModel(pl.LightningModule):
             betas=(hparams.beta1, hparams.beta2),
             weight_decay=hparams.weight_decay,
         )
-        return [opt_gen, opt_disc]
+        return [opt_stn, opt_gen, opt_disc]
 
     def training_step(self, batch, batch_idx):
-        opt_gen, opt_disc = self.optimizers()
+        opt_stn, opt_gen, opt_disc = self.optimizers()
+
         imgs, lbls = batch
-        img_anc, img_pos, img_neg = imgs
+        img_anc, img_pos, img_neg = (
+            [self.stn(img) for img in imgs] if self.hparams.st else imgs
+        )
         lbl_anc, lbl_pos, lbl_neg = lbls
 
         cont_anc, sty_anc = self.encoder(img_anc)
         cont_pos, sty_pos = self.encoder(img_pos)
         cont_neg, sty_neg = self.encoder(img_neg)
+
+        if self.current_epoch < self.hparams.pretraining:
+            lbl_anc_hat = self.classifier(sty_anc)
+            lbl_pos_hat = self.classifier(sty_pos)
+            lbl_neg_hat = self.classifier(sty_neg)
+
+            loss = (
+                self.criterion_ce(lbl_anc_hat, lbl_anc)
+                + self.criterion_ce(lbl_pos_hat, lbl_pos)
+                + self.criterion_ce(lbl_neg_hat, lbl_neg)
+            ) / 3
+
+            accuracy = (
+                self.metric_accuracy(lbl_anc_hat, lbl_anc)
+                + self.metric_accuracy(lbl_pos_hat, lbl_pos)
+                + self.metric_accuracy(lbl_neg_hat, lbl_neg)
+            ) / 3
+
+            self.log(f"pretrain/loss", loss)
+            self.log(f"pretrain/accuracy", accuracy)
+
+            opt_stn.zero_grad()
+            self.manual_backward(loss)
+            opt_stn.step()
+
+            return
 
         img_anc_anc = self.decoder(cont_anc, sty_anc)
         img_anc_pos = self.decoder(cont_anc, sty_pos)
@@ -161,9 +207,9 @@ class MyModel(pl.LightningModule):
         d_anc_anc = self.discriminator(img_anc_anc.detach())
         d_anc_pos = self.discriminator(img_anc_pos.detach())
         d_neg_anc = self.discriminator(img_neg_anc.detach())
-        d_anc = self.discriminator(img_anc)
-        d_pos = self.discriminator(img_pos)
-        d_neg = self.discriminator(img_neg)
+        d_anc = self.discriminator(img_anc.detach())
+        d_pos = self.discriminator(img_pos.detach())
+        d_neg = self.discriminator(img_neg.detach())
         loss = (
             self.criterion_bce(d_anc_anc, torch.zeros_like(d_anc_anc))
             + self.criterion_bce(d_anc_pos, torch.zeros_like(d_anc_pos))
